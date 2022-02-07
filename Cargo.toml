@@ -11,7 +11,7 @@ license = "Apache-2.0"
 edition = "2018"
 
 [target."cfg(not(windows))".dependencies]
-libc = "0.2.40"
+rustix = { version = "0.35.6", features = ["fs", "process", "net"] }
 
 [target."cfg(windows)".dependencies]
 uuid = "1.0.0"

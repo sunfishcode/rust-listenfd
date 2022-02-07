@@ -10,6 +10,12 @@ use crate::unix as imp;
 #[cfg(windows)]
 use crate::windows as imp;
 
+#[cfg(not(windows))]
+use rustix::fd::FromFd;
+
+#[cfg(not(windows))]
+use rustix::net::{AddressFamily, SocketType};
+
 /// A helper object that gives access to raw file descriptors.
 pub struct ListenFd {
     fds: Vec<Option<imp::FdType>>,
@@ -45,7 +51,7 @@ impl ListenFd {
         self.fds.len()
     }
 
-    fn with_fd<R, F: FnOnce(imp::FdType) -> io::Result<R>>(
+    fn with_fd<R, F: FnOnce(imp::FdType) -> Result<R, (io::Error, imp::FdType)>>(
         &mut self,
         idx: usize,
         f: F,
@@ -54,9 +60,11 @@ impl ListenFd {
             Some(None) | None => return Ok(None),
             Some(bucket) => bucket,
         };
-        f(*bucket.as_ref().unwrap()).map(|rv| {
-            bucket.take();
-            Some(rv)
+        // Take the `fd` out and pass it to `f`.
+        f(bucket.take().unwrap()).map(Some).map_err(|(err, fd)| {
+            // `f` failed; put the `fd` back in.
+            bucket.get_or_insert(fd);
+            err
         })
     }
 
@@ -119,11 +127,11 @@ impl ListenFd {
     ///
     /// This function is only available on unix platforms.
     #[cfg(not(windows))]
-    pub fn take_custom<T: std::os::unix::prelude::FromRawFd>(
+    pub fn take_custom<T: FromFd>(
         &mut self,
         idx: usize,
-        sock_fam: libc::c_int,
-        sock_type: libc::c_int,
+        sock_fam: AddressFamily,
+        sock_type: SocketType,
         hint: &str,
     ) -> io::Result<Option<T>> {
         self.with_fd(idx, |fd| imp::make_custom(fd, sock_fam, sock_type, hint))
